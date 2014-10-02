@@ -1,0 +1,48 @@
+{
+   "abstract" : "Perl extension for Next-Generation Sequencing",
+   "author" : [
+      "Michael T. Wolfinger <michael@wolfinger.eu>"
+   ],
+   "dynamic_config" : 1,
+   "generated_by" : "ExtUtils::MakeMaker version 6.64, CPAN::Meta::Converter version 2.120921",
+   "license" : [
+      "unknown"
+   ],
+   "meta-spec" : {
+      "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec",
+      "version" : "2"
+   },
+   "name" : "Bio-ViennaNGS",
+   "no_index" : {
+      "directory" : [
+         "t",
+         "inc"
+      ]
+   },
+   "prereqs" : {
+      "build" : {
+         "requires" : {
+            "ExtUtils::MakeMaker" : "0"
+         }
+      },
+      "configure" : {
+         "requires" : {
+            "ExtUtils::MakeMaker" : "0"
+         }
+      },
+      "runtime" : {
+         "requires" : {
+            "Bio::DB::Sam" : "1.39",
+            "Bio::Perl" : "0",
+            "Carp" : "0",
+            "Data::Dumper" : "0",
+            "File::Basename" : "0",
+            "File::Temp" : "0",
+            "IPC::Cmd" : "0",
+            "Path::Class" : "0"
+         }
+      }
+   },
+   "release_status" : "stable",
+   "version" : "v0.9.0"
+}
