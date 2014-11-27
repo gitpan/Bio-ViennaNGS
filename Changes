@@ -56,3 +56,15 @@ Revision history for Perl extension ViennaNGS.
 	- adjusted utilities to use new namespace
 	- everything is exported via @EXPORT_OK now
 	- updated README
+
+0.10  Thu Nov 27 2014
+	- requires Perl >= 5.12.0
+	- added sortbed()
+	- added uniquify_bam()
+	- added scripts/bam_uniq.pl
+	- added scripts/sj_visualizer.pl
+	- refactored scripts/motiffinda.pl
+	- removed development version of scripts/assembly_hub_constructer.pl
+	- made scripts/gff2bed.pl work with OO Bio::ViennaNGS::AnnoC 
+	- removed get_stranded_subsequence (now lives in Bio::ViennaNGS::Fasta)
+	- updated POD
