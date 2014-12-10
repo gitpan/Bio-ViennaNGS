@@ -1,14 +1,14 @@
 # -*-CPerl-*-
-# Last changed Time-stamp: <2014-11-27 14:21:31 mtw>
+# Last changed Time-stamp: <2014-12-10 15:45:12 mtw>
 
 package Bio::ViennaNGS;
 
 use 5.12.0;
 use Exporter;
-use version; our $VERSION = qv('0.10');
+use version; our $VERSION = qv('0.11');
 use strict;
 use warnings;
-use Bio::Perl 1.006924;
+use Bio::Perl 1.00690001;
 use Bio::DB::Sam 1.39;
 use Data::Dumper;
 use File::Basename qw(basename fileparse);
@@ -16,18 +16,24 @@ use File::Temp qw(tempfile);
 use IPC::Cmd qw(can_run run);
 use Path::Class;
 use Carp;
+use Bio::ViennaNGS::FeatureChain;
 
 our @ISA = qw(Exporter);
 our @EXPORT = ();
-our @EXPORT_OK = qw ( split_bam uniquify_bam bam2bw bed2bw sortbed
-		    bed2bigBed computeTPM featCount_data
-		    parse_multicov write_multicov totalreads );
+
+our @EXPORT_OK = qw ( split_bam uniquify_bam bed_or_bam2bw sortbed
+		      bed2bigBed computeTPM featCount_data
+		      parse_multicov write_multicov totalreads
+		      unique_array kmer_enrichment extend_chain
+		      parse_bed6);
+
 
 #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^#
 #^^^^^^^^^^ Variables ^^^^^^^^^^^#
 #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^#
 
 our @featCount = ();
+my %unique = ();
 
 #^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^#
 #^^^^^^^^^^^ Subroutines ^^^^^^^^^^#
@@ -37,9 +43,6 @@ sub featCount_data {
   return \@featCount;
 }
 
-# split_bam ( $bam,$reverse,$want_uniq,$want_bed,$dest_dir,$log )
-# Splits BAM file $bam according to [+] and [-] strand
-# Returns array with newly splitted BAM files
 sub split_bam {
   my %data = ();
   my @NHval = ();
@@ -291,9 +294,6 @@ sub split_bam {
   return @processed_files;
 }
 
-# uniquify_bam ($bam,$dest,$log)
-# Deconvolute BAM files into unique and multi mappers
-# Returns array of filenames to .uniq. and .mult. BAM files
 sub uniquify_bam {
   my ($bamfile,$dest,$log) = @_;
   my ($bam, $bn,$path,$ext,$read,$header);
@@ -341,8 +341,7 @@ sub uniquify_bam {
 
   rename ($tmp_uniq, $fn_uniq);
   rename ($tmp_mult, $fn_mult);
-  push (@processed_files, $fn_uniq);
-  push (@processed_files, $fn_mult);
+  push (@processed_files, ($fn_uniq,$fn_mult));
 
   if (defined $log){
     my $lf = file($dest,$log);
@@ -353,88 +352,85 @@ sub uniquify_bam {
   }
 }
 
-# bam2bw ( $bam,$chromsizes )
-# Generate BedGraph and BigWig coverage from BAM via two third-party tools:
-# genomeCoverageBed from BEDtools
-# bedGraphToBigWig from UCSC Genome Browser tools
-sub bam2bw {
-  my ($bamfile,$chromsizes) = @_;
-  my $genomeCoverageBed = `which genomeCoverageBed`; chomp($genomeCoverageBed);
-  my $bedGraphToBigWig = `which bedGraphToBigWig`; chomp($bedGraphToBigWig);
-  my $outpath = "./";
-  my $outfolder = $outpath."vis";
-  my ($GCB_cmd,$BGTBW_cmd);
-  my $this_function = (caller(0))[3];
-
-  croak "ERROR [$this_function] Cannot find $bamfile\n"
-    unless (-e $bamfile);
-  croak "ERROR [$this_function] Cannot find $chromsizes ...BigWig cannot be generated\n"
-    unless (-e $chromsizes);
-
-  mkdir $outfolder;
-
-  $GCB_cmd = "$genomeCoverageBed -bg -ibam $bamfile -g $chromsizes > $outfolder/$bamfile.bg";
-  $BGTBW_cmd = "$bedGraphToBigWig $outfolder/$bamfile.bg $chromsizes $outfolder/$bamfile.bw";
-
-  print STDERR ">> $GCB_cmd\n>> $BGTBW_cmd\n";
-  system($GCB_cmd);
-  system($BGTBW_cmd);
-}
-
-# bed2bw ($infile,$chromsizes,$strand,$dest,$want_norm,$size,$scale,$log)
-# Generate stranded BigWig coverage profiles from BED via two third-party tools:
-# genomeCoverageBed from BEDtools
-# bedGraphToBigWig from UCSC Genome Browser tools
-sub bed2bw {
-  my ($infile,$chromsizes,$strand,$dest,$want_norm,$size,$scale,$log) = @_;
+sub bed_or_bam2bw {
+  my ($type,$infile,$chromsizes,$strand,$dest,$want_norm,$size,$scale,$log) = @_;
+  my ($fn_bg_tmp,$fn_bg,$fn_bw);
   my ($bn,$path,$ext,$cmd);
+  my @processed_files = ();
   my $factor = 1.;
   my $this_function = (caller(0))[3];
-  my $genomeCoverageBed = `which genomeCoverageBed`;
-  chomp($genomeCoverageBed);
-  my $bedGraphToBigWig = `which bedGraphToBigWig`;
-  chomp($bedGraphToBigWig);
-  my $awk = `which awk`;
-  chomp($awk);
 
-  open(LOG, ">>", $log) or croak $!;
-  print LOG "LOG [$this_function] \$infile: $infile -- \$chromsizes: $chromsizes --\$dest: $dest\n";
+  croak "ERROR [$this_function] \$type is '$type', however it is expected to be either 'bam' or 'bed'\n"
+    unless ($type eq "bam") || ($type eq "bed");
+
+  my $genomeCoverageBed = can_run('genomeCoverageBed') or
+    croak "ERROR [$this_function] genomeCoverageBed utility not found";
+  my $bedGraphToBigWig = can_run('bedGraphToBigWig') or
+    croak "ERROR [$this_function] bedGraphToBigWig utility not found";
+  my $awk = can_run('awk') or
+    croak "ERROR [$this_function] awk utility not found";
+
+  if(defined $log){
+    open(LOG, ">>", $log) or croak $!;
+    print LOG "LOG [$this_function] \$infile: $infile\n";
+    print LOG "LOG [$this_function] \$dest: $dest\n";
+    print LOG "LOG [$this_function] \$chromsizes: $chromsizes\n";
+  }
 
   croak "ERROR [$this_function] Cannot find $infile\n"
     unless (-e $infile);
-  croak "ERROR [$this_function] Cannot find $chromsizes\n"
-    unless (-e $chromsizes);
   croak "ERROR [$this_function] $dest does not exist\n"
     unless (-d $dest);
+  croak "ERROR [$this_function] Cannot find $chromsizes\n"
+      unless (-e $chromsizes);
 
   if ($want_norm == 1){
     $factor = $scale/$size;
-    print LOG "LOG [$this_function] normalization: $factor = ($scale/$size)\n";
+    print LOG "LOG [$this_function] normalization: $factor = ($scale/$size)\n"
+      if(defined $log);
   }
 
   ($bn,$path,$ext) = fileparse($infile, qr /\..*/);
+  $fn_bg_tmp  = file($dest,$bn.".tmp.bg");
+  $fn_bg      = file($dest,$bn.".bg");
+  if($strand eq "+"){
+    $fn_bw  = file($dest,$bn.".pos.bw");
+  }
+  else {
+    $fn_bw  = file($dest,$bn.".neg.bw");
+  }
 
-  if ($strand eq "+"){
-    $cmd = "$genomeCoverageBed -bg -i $infile -g $chromsizes -strand $strand -scale $factor > $dest/$bn.pos.bg";
-    $cmd .= " && $bedGraphToBigWig $dest/$bn.pos.bg $chromsizes $dest/$bn.pos.bw";
+  $cmd = "$genomeCoverageBed -bg -scale $factor -split ";
+  if ($type eq "bed"){ $cmd .= "-i $infile -g $chromsizes"; } # chrom.sizes only required for processing BED
+  else { $cmd .= "-ibam $infile "; }
+  $cmd .= " > $fn_bg_tmp";
+
+  if($strand eq "-"){
+    $cmd .= " && cat $fn_bg_tmp | $awk \'{ \$4 = - \$4 ; print \$0 }\' > $fn_bg";
   }
   else{
-    $cmd = "$genomeCoverageBed -bg -i $infile -g $chromsizes -strand $strand -scale $factor > $dest/$bn.neg.bg.1";
-    $cmd .= " && cat $dest/$bn.neg.bg.1 | $awk \'{ \$4 = - \$4 ; print \$0 }\' > $dest/$bn.neg.bg";
-    $cmd .= " && $bedGraphToBigWig $dest/$bn.neg.bg $chromsizes  $dest/$bn.neg.bw";
+    $fn_bg = $fn_bg_tmp;
   }
-  print LOG "LOG [$this_function] $cmd\n";
-  system($cmd);
-  if ($strand eq "+"){unlink ("$dest/$bn.pos.bg");} # rm intermediate bedGraph files
-  else{ unlink("$dest/$bn.neg.bg"); unlink("$dest/$bn.neg.bg.1");}
-  close (LOG);
+  $cmd .= " && $bedGraphToBigWig $fn_bg $chromsizes $fn_bw";
+
+  if (defined $log){ print LOG "LOG [$this_function] $cmd\n";}
+
+  my( $success, $error_message, $full_buf, $stdout_buf, $stderr_buf ) =
+    run( command => $cmd, verbose => 0 );
+
+  if( !$success ) {
+    print STDERR "ERROR [$this_function] External command call unsuccessful\n";
+    print STDERR "ERROR: this is what the command printed:\n";
+    print join "", @$full_buf;
+    croak $!;
+  }
+  if (defined $log){ close(LOG); }
+
+  unlink ($fn_bg_tmp);
+  unlink ($fn_bg);
+  return $fn_bw;
 }
 
-# bed2bigBed($infile,$chromsizes,$dest,$log)
-#
-# Use 'bedToBigBed' to make bigBed from BED. A '.bed', '.bed6' or
-# '.bed12' extension of the input file will be replaced by '.bb' in
-# the output.
 sub bed2bigBed {
   my ($infile,$chromsizes,$dest,$log) = @_;
   my ($bn,$path,$ext,$cmd,$outfile);
@@ -442,13 +438,17 @@ sub bed2bigBed {
   my $bed2bigBed = can_run('bedToBigBed') or
     croak "ERROR [$this_function] bedToBigBed utility not found";
 
+  if (defined $log){
+    open(LOG, ">>", $log) or croak $!;
+    print LOG "LOG [$this_function] \$infile: $infile -- \$chromsizes: $chromsizes --\$dest: $dest\n";
+  }
+
   croak "ERROR [$this_function] Cannot find $infile"
     unless (-e $infile);
   croak "ERROR [$this_function] Cannot find $chromsizes"
     unless (-e $chromsizes);
   croak "ERROR [$this_function] $dest does not exist"
     unless (-d $dest);
-  if (defined $log){open(LOG, ">>", $log) or croak $!;}
 
   # .bed6 .bed12 extensions are replaced by .bb
   ($bn,$path,$ext) = fileparse($infile, qr /\.bed[126]?/);
@@ -471,8 +471,6 @@ sub bed2bigBed {
   return $outfile;
 }
 
-# sortbed ($infile,$dest,$outfile,$rm_orig,$log)
-# sorts BED file with 'bedtools sort'
 sub sortbed {
   my ($infile,$dest,$outfile,$rm_orig,$log) = @_;
   my ($cmd,$out);
@@ -509,9 +507,6 @@ sub sortbed {
   if (defined $log){ close(LOG); }
 }
 
-# computeTPM($featCount_sample,$readlength)
-# compute TPM values for a HoH data structure (eg. a single multicov
-# or HTSeq-count column)
 sub computeTPM {
   my ($featCount_sample,$rl) = @_;
   my ($TPM,$T,$totalTPM) = (0)x3;
@@ -535,9 +530,6 @@ sub computeTPM {
   return $meanTPM;
 }
 
-# parse_multicov ($multicov)
-# Parse bedtools multicov (extended BED6) into an Array of Hash of
-# Hashes
 sub parse_multicov {
   my ($file) = @_;
   my @mcData = ();
@@ -569,8 +561,6 @@ sub parse_multicov {
   return $mcSamples;
 }
 
-# write_multicov($item,$dest_dir,$base_name)
-# Write a bedtools multicov (extended BED6) file based from data from @featCount
 sub write_multicov {
   my ($item,$dest_dir,$base_name) = @_;
   my ($outfile,$mcSamples,$nrFeatures,$feat,$i);
@@ -623,13 +613,173 @@ sub totalreads {
   return 1;
 }
 
+sub unique_array{
+
+    my $arrayref = shift;
+    my @array = @{$arrayref};
+
+    foreach my $item (@array)
+    {
+	$unique{$item} ++;
+    }
+    my @arrayuid = sort {$a cmp $b} keys %unique;
+
+    return(\@arrayuid);
+}
+
+sub kmer_enrichment{
+
+    my @seqs =  @{$_[0]};
+    my $klen     = $_[1]; 
+#    my @seq = split( //, $read_tmp );
+    my $kstring ='';
+#return variables
+    my %km;
+    foreach my $sequences (@seqs){
+#      print STDERR $sequences,"\n";
+      my @seq = split( //, $sequences );
+      for ( my $seq_pos = 0; $seq_pos <= $#seq-$klen ; $seq_pos++ ) {
+	for (my $i=$seq_pos;$i<=$seq_pos+($klen-1);$i++){
+	  $kstring .= $seq[$i]; 
+	}
+	$km{$kstring}++;
+	$kstring = "";
+      }
+    }
+    return( \%km );
+}
+
+sub extend_chain{
+  my %sizes = %{$_[0]};
+  my $chain = $_[1];
+  my $l	    = $_[2];
+  my $r	    = $_[3];
+  my $u     = $_[4];
+  my $d     = $_[5];
+
+  ##return a new chain with extended coordinates
+  my $extendchain = $chain;
+  ## got through all features in original chain, calculate new start and end and safe in extendchain
+  my @featarray = @{$extendchain->chain};
+  foreach my $feature (@featarray){
+    my $chrom  = $feature->chromosome;
+    my $start  = $feature->start;
+    my $end    = $feature->end;
+    my $strand = $feature->strand;
+    my $right  = 0;
+    my $left   = 0;
+    my $width  = nearest(1,($end-$start)/2);
+    $width = 0 if ($d > 0 || $u > 0);
+
+    if ($strand eq "+"){
+      if ($d > 0){
+	$start = $end+1;
+	$r = $d;
+      }
+      if ($u > 0){
+	$end = $start-1;
+	$l = $u;
+      }
+      $right=$r;
+      $left=$l;
+    }
+    elsif ($strand eq "-"){
+      if ($u > 0){
+	$start = $end+1;
+	$l = $u;
+      }
+      if ($d > 0){
+	$end = $start-1;
+	$r = $d;
+      }
+      $right=$l;
+      $left=$r;
+    }
+
+    if (($right-$width) <= 0){
+      $right = 0;
+    }
+    else{
+      $right-=$width;
+    }
+    if (($left-$width) <= 0 ){
+      $left = 0;
+    }
+    else{
+      $left-=$width;
+    }
+
+    if ( $start-$left >= 1 ){
+      if ($end+$right >= $sizes{"chr".$chrom}){
+	$end = $sizes{"chr".$chrom};
+      }
+      else{
+	$end += $right;
+      }
+      $start -= ($left+1); ## Because of Bed coordinates, we need to 0-base the result
+    }
+    elsif ( $start-$left <= 0 ){
+      $start = 0;
+      if ($end+$right >= $sizes{"chr".$chrom}){
+	$end = $sizes{"chr".$chrom};
+      }
+      else{
+	$end = $end+$right;
+      }
+    }
+    else{
+      die "Something wrong here!\n";
+    }
+    $feature->start($start);
+    $feature->end($end);
+  }
+  $extendchain->type('extended');
+  return($extendchain);
+}
+
+sub parse_bed6{
+  my $bedfile = shift;
+  open (my $Bed, "<:gzip(autopop)",$bedfile) or die "$!";
+  my @featurelist; ## This will become a FeatureChain
+  while(<$Bed>){
+    ### This should be done by FeatureIO
+    chomp (my $raw = $_);
+    push my @line , split (/\t/,$raw);
+    push @line, "\." if ( !$line[5] ); 
+
+    (my $chromosome  = $line[0])=~ s/chr//g;
+    my $start	     = $line[1]+1;
+    my $end	     = $line[2];
+    my $name	     = $line[3];
+    my $score	     = $line[4];
+    my $strand	     = $line[5];
+    my $extension = '';
+
+    if ($line[6]){
+      for (6..$#line){
+	$extension .= $line[$_]."\t";
+      }
+      $extension = substr($extension,0,-1);
+    }
+    my $feat = Bio::ViennaNGS::Feature->new(chromosome=>$chromosome,
+					    start=>$start,
+					    end=>$end,
+					    name=>$name,
+					    score=>$score,
+					    strand=>$strand,
+					    extension=>$extension);
+    push @featurelist, $feat;
+  }
+  return (\@featurelist);
+}
+
 1;
 __END__
 
 
 =head1 NAME
 
-Bio::ViennaNGS - Perl extension for Next-Generation Sequencing
+Bio::ViennaNGS - A Perl extension for Next-Generation Sequencing data
 analysis
 
 =head1 SYNOPSIS
@@ -642,11 +792,10 @@ analysis
   # extract unique and multi mappers from a BAM file
   @result = uniquify_bam($bam_in,$outdir,$logfile);
 
-  # make bigWig from BAM
-  bam2bw($bam_in,$chromsizes)
-
-  # make bigWig from BED
-  bed2bw($bed_in,$cs_in,"+",$destdir,$wantnorm,$size_p,$scale,$logfile);
+  # make bigWig from BED or BAM
+  $type = "bam";
+  $strand = "+";
+  $bwfile = bed_or_bam2bw($type,$infile,$cs_in,$strand,$destdir,$wantnorm,$size_p,$scale,$logfile);
 
   # make bigBed from BED
   my $bb = bed2bigBed($bed_in,$cs_in,$destdir,$logfile);
@@ -661,13 +810,15 @@ analysis
   $conds = parse_multicov($infile);
 
   # write bedtools multicov compatible file
-  write_multicov("TPM", $destdir, $basename);
+  write_multicov("TPM",$destdir,$basename);
 
 =head1 DESCRIPTION
 
 Bio::ViennaNGS is a collection of utilities and subroutines for
 building efficient Next-Generation Sequencing (NGS) data analysis
 pipelines.
+
+=head2 ROUTINES
 
 =over
 
@@ -693,6 +844,14 @@ read assignment (with respect to the underlying annotation). In those
 cases, the natural mapping of the reads can be obtained by the
 C<$reverse> flag.
 
+This routine returns an array whose fist two elements are the file
+names of the newly generate BAM files with reads mapped to the
+positive, and negative strand, respectively. Elements three and four
+are the number of fragments mapped to the positive and negative
+strand. If the C<$want_bed> option was given elements fiveand six are
+the file names of the output BED files for positive and negative
+strand, respectively.
+
 NOTE: Filtering of unique mappers is only safe for single-end
 experiments; In paired-end experiments, read and mate are treated
 separately, thus allowing for scenarios where eg. one read is a
@@ -707,34 +866,50 @@ output folder C<$dest>, which are named B<basename.uniq.bam> and
 B<basename.mult.bam>, respectively. If defined, a logfile named
 C<$log> is created in the output folder.
 
-=item bam2bw($bam,$chromsizes)
+This routine returns an array holding file names of the newly created
+BAm files for unique and multi mappers, respectively.
 
-Creates BedGraph and BigWig coverage profiles from BAM files. These
-can easily be visualized as L<UCSC Genome Browser
-TrackHubs|http://genome.ucsc.edu/goldenPath/help/hgTrackHubHelp.html>. Internally,
-the conversion is accomplished by two third-party applications:
-L<genomeCoverageBed|http://bedtools.readthedocs.org/en/latest/content/tools/genomecov.html>
-and L<bedGraphToBigWig|http://hgdownload.cse.ucsc.edu/admin/exe/>.
+=item bed_or_bam2bw($type,$infile,$chromsizes,$strand,$dest,$want_norm,$size,$scale,$log)
 
-=item bed2bw($infile,$chromsizes,$strand,$dest,$want_norm,$size,$scale,$log)
-
-Creates stranded, normalized BigWig coverage profiles from BED
-files. C<$chromsizes> is the chromosome.sizes files, C<$strand> is
+Creates stranded, normalized BigWig coverage profiles from
+strand-specific BAM or BED files (provided via C<$infile>). The
+routine expects a file type 'bam' or 'bed' via the C<$type>
+argument. C<$chromsizes> is the chromosome.sizes files, C<$strand> is
 either "+" or "-" and C<$dest> contains the output path for
 results. For normlization of bigWig profiles, additional attributes
 are required: C<$want_norm> triggers normalization with values 0 or
-1. C<$size> is the number of elements (features) in the BED file and
-C<$scale> gives the number to which data is normalized (ie. every
+1. C<$size> is the number of fragments/elements in the BAM or BED file
+and C<$scale> gives the number to which data is normalized (ie. every
 bedGraph entry is multiplied by a factor (C<$scale>/C<$size>). C<$log>
-holds path and name of log file.
+is expected to contain either the full path and file name of log file
+or 'undef'. The routine returns the full file name of the newly
+generated bigWig file.
 
-Stranded BigWigs can easily be visualized via TrackHubs in the UCSC
-Genome Browser. Internally, the conversion is accomplished by two
-third-party applications:
+While this routine can handle non-straned BAM/BED files (in which case
+C<$strand> should be set to "+" and hence all coverage profiles will
+be created with a positive sign, even if they map to the negative
+strand), usage of strand-specific data is highly recommended. For BAM
+file, this is easily achieved by calling the L<bam_split> routine (see
+above) prior to this one, thus creating dedicated BAM files containing
+exclusively reads mapped to the positive or negative strand,
+respectively.
+
+It is important to know that this routine B<does not extract> reads
+mapped to either strand from a non-stranded BAM/BED file if the
+C<$strand> argument is given. It rather adjusts the sign of B<all>
+mapped reads/features in a BAM/BED file and then creates bigWig
+files. See the L<split_bam> routine for extracting reads mapped to
+either strand.
+
+Stranded bigWigs can easily be visualized via
+L<TrackHubs|http://genome.ucsc.edu/goldenPath/help/hgTrackHubHelp.html>
+in the UCSC Genome Browser. Internally, the conversion from BAM/BED to
+bigWig is accomplished via two third-party applications:
 L<genomeCoverageBed|http://bedtools.readthedocs.org/en/latest/content/tools/genomecov.html>
 and
 L<bedGraphToBigWig|http://hgdownload.cse.ucsc.edu/admin/exe/>. Intermediate
-bedGraph files are removed automatically.
+bedGraph files are removed automatically once the bigWig files are
+ready.
 
 =item sortbed($infile,$dest,$outfile,$rm_orig,$log)
 
@@ -795,7 +970,7 @@ output file.
 
 =over 7
 
-=item  L<Bio::Perl> >= 1.006924
+=item  L<Bio::Perl> >= 1.00690001
 
 =item  L<BIO::DB::Sam> >= 1.39
 
@@ -832,6 +1007,8 @@ L<BEDtools|https://github.com/arq5x/bedtools2> on your system.
 
 =item L<Bio::ViennaNGS::Fasta>
 
+=item L<Bio::ViennaNGS::FeatureChain>
+
 =back
 
 =head1 AUTHORS
@@ -840,9 +1017,12 @@ L<BEDtools|https://github.com/arq5x/bedtools2> on your system.
 
 =item Michael T. Wolfinger E<lt>michael@wolfinger.euE<gt>
 
-=item Florian Eggenhofer E<lt>florian.eggenhofer@univie.ac.atE<gt>
+=item Jörg Fallmann E<lt>fall@tbi.univie.ac.atE<gt>
 
-=item Joerg Fallmann E<lt>fall@tbi.univie.ac.atE<gt>
+=item Florian Eggenhofer E<lt>florian.eggenhofer@tbi.univie.ac.atE<gt>
+
+=item Fabian Amman E<lt>fabian@tbi.univie.ac.at<gt>
+
 
 =back
 

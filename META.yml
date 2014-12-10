@@ -1,29 +1,39 @@
 ---
-abstract: 'Perl extension for Next-Generation Sequencing analysis'
+abstract: 'A Perl extension for Next-Generation Sequencing data'
 author:
-  - 'Michael T. Wolfinger <michael@wolfinger.eu>'
+  - 'Michael T. Wolfinger'
 build_requires:
-  ExtUtils::MakeMaker: '0'
+  Test::More: 0
 configure_requires:
-  ExtUtils::MakeMaker: '0'
+  ExtUtils::MakeMaker: 0
 dynamic_config: 1
-generated_by: 'ExtUtils::MakeMaker version 6.98, CPAN::Meta::Converter version 2.142690'
-license: unknown
+generated_by: 'ExtUtils::MakeMaker version 6.64, CPAN::Meta::Converter version 2.120921'
+license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
-  version: '1.4'
+  version: 1.4
 name: Bio-ViennaNGS
 no_index:
   directory:
     - t
     - inc
 requires:
-  Bio::DB::Sam: '1.39'
-  Bio::Perl: '0'
-  Carp: '0'
-  Data::Dumper: '0'
-  File::Basename: '0'
-  File::Temp: '0'
-  IPC::Cmd: '0'
-  Path::Class: '0'
-version: v0.10.0
+  Bio::DB::Fasta: 0
+  Bio::DB::Sam: 1.39
+  Bio::Root::Version: 1.00690001
+  Bio::Tools::GFF: 0
+  Carp: 0
+  Data::Dumper: 0
+  File::Basename: 0
+  File::Share: 0
+  File::Temp: 0
+  Getopt::Long: 2.0
+  IPC::Cmd: 0
+  Moose: 0
+  Moose::Util::TypeConstraints: 0
+  POSIX: 0
+  Path::Class: 0
+  Pod::Usage: 0
+  namespace::autoclean: 0
+  perl: 5.010
+version: v0.11.0

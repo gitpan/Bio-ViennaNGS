@@ -1,12 +1,12 @@
 {
-   "abstract" : "Perl extension for Next-Generation Sequencing analysis",
+   "abstract" : "A Perl extension for Next-Generation Sequencing data",
    "author" : [
-      "Michael T. Wolfinger <michael@wolfinger.eu>"
+      "Michael T. Wolfinger"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "ExtUtils::MakeMaker version 6.98, CPAN::Meta::Converter version 2.142690",
+   "generated_by" : "ExtUtils::MakeMaker version 6.64, CPAN::Meta::Converter version 2.120921",
    "license" : [
-      "unknown"
+      "perl_5"
    ],
    "meta-spec" : {
       "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec",
@@ -22,7 +22,7 @@
    "prereqs" : {
       "build" : {
          "requires" : {
-            "ExtUtils::MakeMaker" : "0"
+            "Test::More" : "0"
          }
       },
       "configure" : {
@@ -32,17 +32,27 @@
       },
       "runtime" : {
          "requires" : {
+            "Bio::DB::Fasta" : "0",
             "Bio::DB::Sam" : "1.39",
-            "Bio::Perl" : "0",
+            "Bio::Root::Version" : "1.00690001",
+            "Bio::Tools::GFF" : "0",
             "Carp" : "0",
             "Data::Dumper" : "0",
             "File::Basename" : "0",
+            "File::Share" : "0",
             "File::Temp" : "0",
+            "Getopt::Long" : "2.0",
             "IPC::Cmd" : "0",
-            "Path::Class" : "0"
+            "Moose" : "0",
+            "Moose::Util::TypeConstraints" : "0",
+            "POSIX" : "0",
+            "Path::Class" : "0",
+            "Pod::Usage" : "0",
+            "namespace::autoclean" : "0",
+            "perl" : "5.010"
          }
       }
    },
    "release_status" : "stable",
-   "version" : "v0.10.0"
+   "version" : "v0.11.0"
 }
