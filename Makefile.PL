@@ -7,7 +7,7 @@ use File::ShareDir::Install;
 
 install_share dist => 'share';
 
-my @scripts = qw (bam_split.pl bam_to_bigwig.pl bam_uniq.pl bed2bedGraph.pl extend_bed.pl gff2bed.pl kmer_analysis.pl MEME_XML_motif_extractor.pl motiffinda.pl newUCSCdb.pl normalize_multicov.pl sj_visualizer.pl splice_site_summary.pl trim_fastq.pl);
+my @scripts = qw (assembly_hub_constructor.pl bam_quality_stat.pl bam_split.pl bam_to_bigwig.pl bam_uniq.pl bed2bedGraph.pl extend_bed.pl gff2bed.pl kmer_analysis.pl MEME_XML_motif_extractor.pl motiffinda.pl newUCSCdb.pl normalize_multicov.pl sj_visualizer.pl splice_site_summary.pl trim_fastq.pl Tutorial_pipeline01.pl);
 WriteMakefile(
 	      'NAME'            => 'Bio::ViennaNGS',
 	      'AUTHOR'          => q{Michael T. Wolfinger},
@@ -25,10 +25,14 @@ WriteMakefile(
 				    "File::Temp" 	        => '0',
 				    "IPC::Cmd" 		        => '0',
 				    "Path::Class" 	        => '0',
+				    "Math::Round"               => '0',
 				    "Pod::Usage" 	        => '0',
+				    "PerlIO::gzip"              => '0',
 				    "POSIX" 		        => '0',
 				    "Carp" 		        => '0',
+				    "Tie::Hash::Indexed"        => '0',
 				    "Moose"      		=> '0',
+				    "MooseX::Clone"             => '0',
 				    "Moose::Util::TypeConstraints" => 0,
 				    "namespace::autoclean"  => '0',
 				    "File::Share"           => '0',
@@ -37,18 +41,13 @@ WriteMakefile(
 	      'EXE_FILES'                 => [ map { "scripts/$_" } @scripts ],
 	      'CONFIGURE_REQUIRES'        => {
 					      'ExtUtils::MakeMaker' => 0,
-					     },  
+					     },
 	      'BUILD_REQUIRES' => {
 				   'Test::More' => 0,
-				  },  
+				  },
 	      dist  => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
 	      clean => { FILES => 'Bio-ViennaNGS-*' },
 	     );
-
-#    ($] >= 5.005 ?
-#     (ABSTRACT_FROM  => 'lib/Bio/ViennaNGS.pm',
-#      AUTHOR         => 'Michael T. Wolfinger <michael@wolfinger.eu>') : ()),
-#    );
 
 package MY;
 use File::ShareDir::Install qw(postamble);
