@@ -4,7 +4,7 @@
       "Michael T. Wolfinger"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "ExtUtils::MakeMaker version 6.98, CPAN::Meta::Converter version 2.142690",
+   "generated_by" : "ExtUtils::MakeMaker version 7.04, CPAN::Meta::Converter version 2.143240",
    "license" : [
       "perl_5"
    ],
@@ -58,5 +58,5 @@
       }
    },
    "release_status" : "testing",
-   "version" : "v0.12_7"
+   "version" : "v0.12_8"
 }
